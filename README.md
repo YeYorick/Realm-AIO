@@ -1,6 +1,6 @@
 # Realm AIO 一键脚本（中转机 / 落地机 / TLS / WS / WSS）
 
-这是一个基于Realm（https://github.com/zhboner/realm）的一键部署脚本，  
+这是一个基于 Realm（https://github.com/zhboner/realm） 的一键部署脚本，  
 将 **中转机（入口）** 和 **落地机（出口）** 的配置逻辑融合在 **同一个脚本** 中，支持：
 
 - 自动检测 CPU 架构并下载对应的 realm 二进制
