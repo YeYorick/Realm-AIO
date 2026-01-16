@@ -37,9 +37,7 @@
 ## 🚀 一键部署（Linux）
 
 ```bash
-wget https://raw.githubusercontent.com/YeYorick/Realm-AIO/main/realm-aio.sh
-chmod +x realm-aio.sh
-sudo ./realm-aio.sh wizard
+wget https://raw.githubusercontent.com/YeYorick/Realm-AIO/main/realm-aio.sh && chmod +x realm-aio.sh && sudo ./realm-aio.sh wizard
 ```
 
 
