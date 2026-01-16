@@ -4,8 +4,9 @@ set -euo pipefail
 ############################################
 # Realm AIO 一键脚本（中转机/落地机融合）
 # - 自动检测架构下载最新 realm
-# - 向导：生成“中转机配置”和“落地机配置”（支持 TLS / WS / WSS）
-# - 落地机 TLS/WSS：可自动生成自签证书（cert/key）
+# - 向导：生成“中转机配置”和“落地机配置”（支持 plain / TLS / WS / WSS）
+# - 固定：日志 warn、日志 /var/log/realm.log、TCP+UDP 启用（不再询问）
+# - 落地机 TLS/WSS：自动生成自签证书（cert/key，不询问）
 # - systemd 自启动
 ############################################
 
@@ -145,7 +146,6 @@ gen_self_signed_cert() {
     return 0
   fi
 
-  # CN 不重要（realm 通常走 sni/servername + insecure 方式）
   openssl req -x509 -newkey rsa:2048 -nodes \
     -keyout "$CERT_KEY" -out "$CERT_CRT" -days 3650 \
     -subj "/CN=realm-self-signed" >/dev/null 2>&1
@@ -156,23 +156,17 @@ gen_self_signed_cert() {
   info "已生成私钥文件：$CERT_KEY"
 }
 
-# 生成基础头部
-write_config_header() {
-  local log_level="${1:-warn}"
-  local log_output="${2:-/var/log/realm.log}"
-  local no_tcp="${3:-false}"
-  local use_udp="${4:-true}"
-
+# 生成基础头部（固定参数：不询问）
+write_config_header_fixed() {
   mkdir -p "$CONF_DIR"
-
-  cat >"$CONF_FILE" <<EOF
+  cat >"$CONF_FILE" <<'EOF'
 [log]
-level = "${log_level}"
-output = "${log_output}"
+level = "warn"
+output = "/var/log/realm.log"
 
 [network]
-no_tcp = ${no_tcp}
-use_udp = ${use_udp}
+no_tcp = false
+use_udp = true
 
 EOF
 }
@@ -198,19 +192,22 @@ append_endpoint() {
   } >>"$CONF_FILE"
 }
 
+# 加密/伪装方式选择（带解释）
 pick_transport_mode() {
-  echo "请选择加密/伪装方式："
-  echo "  1) 不加密（plain）"
-  echo "  2) TLS（纯 TLS，推荐配合自签 + 中转端 insecure）"
-  echo "  3) WS（无 TLS，只有 WebSocket 伪装，不加密）"
-  echo "  4) WSS（WS + TLS，加密 + 伪装，推荐）"
+  echo
+  echo "请选择中转链路的传输方式（加密/伪装）："
+  echo "  1) plain  - 明文直连（不加密、不伪装）"
+  echo "  2) tls    - TLS 加密（推荐：中转端 insecure + SNI 伪装）"
+  echo "  3) ws     - WebSocket 伪装（不加密）"
+  echo "  4) wss    - WS + TLS（加密 + 伪装，公网强烈推荐）"
+  echo
   read -r -p "请输入 1-4： " mode
   case "${mode:-}" in
     1) echo "plain" ;;
     2) echo "tls" ;;
     3) echo "ws" ;;
     4) echo "wss" ;;
-    *) err "输入无效" ;;
+    *) err "输入无效：只能输入 1-4" ;;
   esac
 }
 
@@ -218,66 +215,47 @@ wizard() {
   need_root
   need_cmd curl; need_cmd tar; need_cmd install
 
+  # 防呆：wizard 需要交互，不允许 curl|bash 管道执行
+  if [[ ! -t 0 ]]; then
+    err "wizard 为交互模式，不支持通过管道执行（curl | bash）。请先下载脚本再运行：\nwget <raw链接> && chmod +x realm-aio.sh && sudo ./realm-aio.sh wizard"
+  fi
+
   echo "==== Realm AIO 向导（中转/落地融合）===="
   echo "你现在要配置哪一台？"
   echo "  1) 中转机（入口）"
   echo "  2) 落地机（出口）"
   read -r -p "请输入 1-2： " role
+  [[ "$role" == "1" || "$role" == "2" ]] || err "输入无效：只能输入 1 或 2"
 
   # 先安装/更新二进制
   download_and_install
 
-  # 通用参数
-  read -r -p "日志等级（warn/info/debug/error，默认 warn）： " log_level
-  log_level="${log_level:-warn}"
-  read -r -p "日志输出路径（默认 /var/log/realm.log）： " log_output
-  log_output="${log_output:-/var/log/realm.log}"
+  # 固定写配置头（不再询问日志/UDP/TCP）
+  write_config_header_fixed
 
-  read -r -p "是否启用 UDP 转发？(y/n，默认 y)： " udp_yn
-  local use_udp="true"
-  [[ "${udp_yn,,}" == "n" ]] && use_udp="false"
-
-  read -r -p "是否禁用 TCP 转发？(y/n，默认 n)： " notcp_yn
-  local no_tcp="false"
-  [[ "${notcp_yn,,}" == "y" ]] && no_tcp="true"
-
-  write_config_header "$log_level" "$log_output" "$no_tcp" "$use_udp"
-
+  # 仍然询问：加密方式
   local mode
   mode="$(pick_transport_mode)"
 
-  # 统一收集伪装参数（ws/wss）
+  # ws/wss：收集伪装参数（可回车用默认）
   local ws_host="" ws_path="/"
   if [[ "$mode" == "ws" || "$mode" == "wss" ]]; then
-    read -r -p "WS Host（伪装域名/Host 头，例如 www.amazon.com）： " ws_host
+    read -r -p "WS Host（伪装域名/Host 头，例如 www.amazon.com，默认 www.amazon.com）： " ws_host
     ws_host="${ws_host:-www.amazon.com}"
     read -r -p "WS Path（例如 /abcd，默认 /）： " ws_path
     ws_path="${ws_path:-/}"
   fi
 
-  # 统一收集 SNI/ServerName（tls/wss）
+  # tls/wss：收集 SNI（可回车用默认）
   local sni_name=""
   if [[ "$mode" == "tls" || "$mode" == "wss" ]]; then
-    read -r -p "SNI/ServerName（例如 www.amazon.com）： " sni_name
+    read -r -p "SNI/ServerName（例如 www.amazon.com，默认 www.amazon.com）： " sni_name
     sni_name="${sni_name:-www.amazon.com}"
   fi
 
-  # 注意：TLS 服务端 listen_transport 通常需要 cert/key（否则可能报错）
-  local need_cert="0"
+  # 落地机 TLS/WSS：固定自动生成自签证书（不询问）
   if [[ "$role" == "2" && ( "$mode" == "tls" || "$mode" == "wss" ) ]]; then
-    need_cert="1"
-  fi
-
-  if [[ "$need_cert" == "1" ]]; then
-    read -r -p "落地机需要 TLS 证书：是否自动生成自签证书？(y/n，默认 y)： " cert_yn
-    cert_yn="${cert_yn:-y}"
-    if [[ "${cert_yn,,}" == "y" ]]; then
-      gen_self_signed_cert
-    else
-      warn "你选择不自动生成证书。请确保你稍后手动放置证书："
-      warn "  证书：$CERT_CRT"
-      warn "  私钥：$CERT_KEY"
-    fi
+    gen_self_signed_cert
   fi
 
   echo
@@ -294,48 +272,38 @@ wizard() {
       read -r -p "落地机地址 remote（如 1.1.1.1:20000）： " remote_addr || true
       [[ -z "${remote_addr:-}" ]] && err "remote 不能为空"
 
-      # 中转机只需要 remote_transport（到落地机的加密/伪装）
       local remote_transport=""
       case "$mode" in
-        plain)
-          remote_transport=""
-          ;;
-        tls)
-          # 中转机作为 TLS 客户端，常用 insecure（落地机自签/不校验）
-          remote_transport="tls;sni=${sni_name};insecure"
-          ;;
-        ws)
-          remote_transport="ws;host=${ws_host};path=${ws_path}"
-          ;;
-        wss)
-          # WSS：ws + tls + insecure（落地机自签）
-          # 注意：servername/sni 字段在不同版本/示例里会见到两种写法，
-          # 这里用 sni 作为默认；如果你实际环境需要 servername，你也可以手动改配置。
-          remote_transport="ws;host=${ws_host};path=${ws_path};tls;sni=${sni_name};insecure"
-          ;;
+        plain) remote_transport="" ;;
+        tls)   remote_transport="tls;sni=${sni_name};insecure" ;;
+        ws)    remote_transport="ws;host=${ws_host};path=${ws_path}" ;;
+        wss)   remote_transport="ws;host=${ws_host};path=${ws_path};tls;sni=${sni_name};insecure" ;;
       esac
 
       append_endpoint "$listen_addr" "$remote_addr" "" "$remote_transport"
 
-      # 同时打印“落地机对应规则模板”（给你复制用）
       echo
-      warn "【落地机对应规则模板】（复制到落地机向导/配置里）"
+      warn "【落地机对应规则模板】（复制到落地机配置里，remote 请改成真实目标端口）"
       case "$mode" in
         plain)
+          echo "[[endpoints]]"
           echo "listen = \"0.0.0.0:$(echo "$remote_addr" | awk -F: '{print $2}')\""
           echo "remote = \"127.0.0.1:目标端口\""
           ;;
         tls)
+          echo "[[endpoints]]"
           echo "listen = \"0.0.0.0:$(echo "$remote_addr" | awk -F: '{print $2}')\""
           echo "remote = \"127.0.0.1:目标端口\""
           echo "listen_transport = \"tls;cert=${CERT_CRT};key=${CERT_KEY}\""
           ;;
         ws)
+          echo "[[endpoints]]"
           echo "listen = \"0.0.0.0:$(echo "$remote_addr" | awk -F: '{print $2}')\""
           echo "remote = \"127.0.0.1:目标端口\""
           echo "listen_transport = \"ws;host=${ws_host};path=${ws_path}\""
           ;;
         wss)
+          echo "[[endpoints]]"
           echo "listen = \"0.0.0.0:$(echo "$remote_addr" | awk -F: '{print $2}')\""
           echo "remote = \"127.0.0.1:目标端口\""
           echo "listen_transport = \"ws;host=${ws_host};path=${ws_path};tls;cert=${CERT_CRT};key=${CERT_KEY}\""
@@ -348,26 +316,15 @@ wizard() {
       read -r -p "真实目标地址 remote（如 127.0.0.1:443 或 8.8.8.8:222）： " target_addr || true
       [[ -z "${target_addr:-}" ]] && err "remote 不能为空"
 
-      # 落地机需要 listen_transport（用于接收中转机的加密/伪装）
       local listen_transport=""
       case "$mode" in
-        plain)
-          listen_transport=""
-          ;;
-        tls)
-          listen_transport="tls;cert=${CERT_CRT};key=${CERT_KEY}"
-          ;;
-        ws)
-          listen_transport="ws;host=${ws_host};path=${ws_path}"
-          ;;
-        wss)
-          listen_transport="ws;host=${ws_host};path=${ws_path};tls;cert=${CERT_CRT};key=${CERT_KEY}"
-          ;;
+        plain) listen_transport="" ;;
+        tls)   listen_transport="tls;cert=${CERT_CRT};key=${CERT_KEY}" ;;
+        ws)    listen_transport="ws;host=${ws_host};path=${ws_path}" ;;
+        wss)   listen_transport="ws;host=${ws_host};path=${ws_path};tls;cert=${CERT_CRT};key=${CERT_KEY}" ;;
       esac
 
       append_endpoint "$listen_addr" "$target_addr" "$listen_transport" ""
-    else
-      err "角色输入无效"
     fi
 
     added="1"
@@ -383,7 +340,7 @@ wizard() {
   info "===== 完成 ====="
   info "可执行文件：$INSTALL_BIN"
   info "配置文件：  $CONF_FILE"
-  if [[ "$need_cert" == "1" ]]; then
+  if [[ "$role" == "2" && ( "$mode" == "tls" || "$mode" == "wss" ) ]]; then
     info "证书文件：  $CERT_CRT"
     info "私钥文件：  $CERT_KEY"
   fi
@@ -395,15 +352,16 @@ help() {
 Realm AIO 一键脚本（中转/落地融合）
 
 用法：
-  sudo bash realm-aio.sh wizard     # 向导：选择中转机/落地机并生成配置+服务
+  sudo bash realm-aio.sh wizard     # 交互向导（生成配置 + 安装 + systemd）
   sudo bash realm-aio.sh install    # 仅安装/更新 realm 二进制
   sudo bash realm-aio.sh status     # 查看服务状态（systemd）
   sudo bash realm-aio.sh restart    # 重启服务（systemd）
   sudo bash realm-aio.sh uninstall  # 卸载（程序/配置/systemd）
 
 说明：
+- 固定：日志 warn、日志 /var/log/realm.log、TCP+UDP 启用（不再询问）
 - 中转机：生成 remote_transport（plain/tls/ws/wss）
-- 落地机：生成 listen_transport；TLS/WSS 会用 cert/key（可自动生成自签）
+- 落地机：生成 listen_transport；TLS/WSS 自动生成自签证书（不询问）
 EOF
 }
 
