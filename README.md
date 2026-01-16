@@ -23,18 +23,21 @@
 └── README.md
 ```
 二、支持的模式说明（非常重要）
-模式	是否加密	是否伪装	说明
-plain	❌	❌	明文 TCP/UDP 转发，仅测试用
-TLS	✅	❌	纯 TLS 加密
-WS	❌	✅	WebSocket 伪装，不加密
-WSS	✅	✅	WS + TLS（推荐）
+| 模式      | 是否加密 | 是否伪装 | 说明                 |
+| ------- | ---- | ---- | ------------------ |
+| plain   | ❌    | ❌    | 明文 TCP/UDP 转发，仅测试用 |
+| TLS     | ✅    | ❌    | 纯 TLS 加密           |
+| WS      | ❌    | ✅    | WebSocket 伪装，不加密   |
+| **WSS** | ✅    | ✅    | **WS + TLS（推荐）**   |
 
-公网中转强烈推荐使用 WSS
+## 🚀 公网中转 **强烈推荐使用 TLS WSS**
+
 
 三、快速开始（推荐流程）
 1️⃣ 在【落地机】执行（先做）
+```sh
 sudo bash realm-aio.sh wizard
-
+```
 
 选择：
 
@@ -88,13 +91,16 @@ remote = 落地机IP:20000
    v
 真实目标 (127.0.0.1:443 / 8.8.8.8:222)
 
+
 五、配置文件位置
-项目	路径
-realm 二进制	/usr/local/bin/realm
-主配置文件	/etc/realm/realm.toml
-TLS 证书	/etc/realm/certs/realm.crt
-TLS 私钥	/etc/realm/certs/realm.key
-systemd 服务	/etc/systemd/system/realm.service
+| 项目         | 路径                                  |
+| ---------- | ----------------------------------- |
+| realm 二进制  | `/usr/local/bin/realm`              |
+| 主配置文件      | `/etc/realm/realm.toml`             |
+| TLS 证书     | `/etc/realm/certs/realm.crt`        |
+| TLS 私钥     | `/etc/realm/certs/realm.key`        |
+| systemd 服务 | `/etc/systemd/system/realm.service` |
+
 六、常用命令
 查看状态
 ```sh
@@ -147,9 +153,11 @@ Q4：realm 支持 UDP 吗？
 作者不对任何滥用行为负责
 
 十、推荐组合（实战）
-|---|---|
-场景	推荐方案
-公网中转	WSS
-内网 / 专线	TLS
-调试	plain
-伪装优先	WS / WSS
+| 场景      | 推荐方案     |
+| ------- | -------- |
+| 公网中转    | **WSS**  |
+| 内网 / 专线 | TLS      |
+| 调试      | plain    |
+| 伪装优先    | WS / WSS |
+
+
