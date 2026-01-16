@@ -36,12 +36,6 @@
 三、快速开始（推荐流程）
 ## 🚀 一键部署（Linux）
 
-### 方式一：一行命令（推荐）
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/YeYorick/Realm-AIO/main/realm-aio.sh | sudo bash -s -- wizard
-```
-### 方式二：
 ```bash
 wget https://raw.githubusercontent.com/YeYorick/Realm-AIO/main/realm-aio.sh
 chmod +x realm-aio.sh
@@ -50,6 +44,7 @@ sudo ./realm-aio.sh wizard
 
 
 ## 手动下载执行
+下载 Realm AIO shell脚本
 1️⃣ 在【落地机】执行（先做）
 ```sh
 sudo bash realm-aio.sh wizard
